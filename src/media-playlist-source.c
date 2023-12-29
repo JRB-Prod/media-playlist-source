@@ -25,6 +25,8 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #define S_RESTART_BEHAVIOR "restart_behavior"
 #define S_CURRENT_FILE_NAME "current_file_name"
 #define S_SELECT_FILE "select_file"
+#define S_DEINTERLACE_MODE "deinterlace_mode"
+#define S_DEINTERLACE_FIELD_ORDER "deinterlace_field_order"
 
 #define S_CURRENT_MEDIA_INDEX "current_media_index"
 #define S_CURRENT_FOLDER_ITEM_FILENAME "current_folder_item_filename"
@@ -51,6 +53,21 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #define T_CURRENT_FILE_NAME T_("CurrentFileName")
 #define T_SELECT_FILE T_("SelectFile")
 #define T_NO_FILE_SELECTED T_("NoFileSelected")
+
+#define T_DEINTERLACE_MODE T_("DeinterlaceMode")
+#define T_DEINTERLACE_MODE_LONG_DESC T_("DeinterlaceMode.LongDescription")
+#define T_DEINTERLACE_MODE_DISABLE T_("DeinterlaceMode.Disable")
+#define T_DEINTERLACE_MODE_DISCARD T_("DeinterlaceMode.Discard")
+#define T_DEINTERLACE_MODE_RETRO T_("DeinterlaceMode.Retro")
+#define T_DEINTERLACE_MODE_BLEND T_("DeinterlaceMode.Blend")
+#define T_DEINTERLACE_MODE_BLEND_2X T_("DeinterlaceMode.Blend2X")
+#define T_DEINTERLACE_MODE_LINEAR T_("DeinterlaceMode.Linear")
+#define T_DEINTERLACE_MODE_LINEAR_2X T_("DeinterlaceMode.Linear2X")
+#define T_DEINTERLACE_MODE_YADIF T_("DeinterlaceMode.Yadif")
+#define T_DEINTERLACE_MODE_YADIF_2X T_("DeinterlaceMode.Yadif2X")
+#define T_DEINTERLACE_FIELD_ORDER T_("DeinterlaceFieldOrder")
+#define T_DEINTERLACE_FIELD_ORDER_TOP T_("DeinterlaceFieldOrder.Top")
+#define T_DEINTERLACE_FIELD_ORDER_BOTTOM T_("DeinterlaceFieldOrder.Bottom")
 
 #define T_PLAY_PAUSE T_("PlayPause")
 #define T_RESTART T_("Restart")
@@ -92,7 +109,7 @@ set_current_folder_item_index(struct media_playlist_source *mps, size_t index)
 		} else {
 			mps->current_folder_item_index = index = 0;
 		}
-		mps->actual_media =
+mps->actual_media =
 			&mps->current_media->folder_items.array[index];
 		mps->current_media_filename =
 			bstrdup(mps->actual_media->filename);
@@ -1041,6 +1058,40 @@ static obs_properties_t *mps_properties(void *data)
 	obs_property_list_add_int(p, T_RESTART_BEHAVIOR_FIRST_FILE,
 				  RESTART_BEHAVIOR_FIRST_FILE);
 
+	/* Add the interlace options to the properties menu, as right clicking
+	 * on the media source does not work because the 'OBS_SOURCE_ASYNC'
+	 * flag is missing.
+	 */
+	p = obs_properties_add_list(props, S_DEINTERLACE_MODE,
+				    T_DEINTERLACE_MODE, OBS_COMBO_TYPE_LIST,
+				    OBS_COMBO_FORMAT_INT);
+	obs_property_set_long_description(p, T_DEINTERLACE_MODE_LONG_DESC);
+	obs_property_list_add_int(p, T_DEINTERLACE_MODE_DISABLE,
+				  OBS_DEINTERLACE_MODE_DISABLE);
+	obs_property_list_add_int(p, T_DEINTERLACE_MODE_DISCARD,
+				  OBS_DEINTERLACE_MODE_DISCARD);
+	obs_property_list_add_int(p, T_DEINTERLACE_MODE_RETRO,
+				  OBS_DEINTERLACE_MODE_RETRO);
+	obs_property_list_add_int(p, T_DEINTERLACE_MODE_BLEND,
+				  OBS_DEINTERLACE_MODE_BLEND);
+	obs_property_list_add_int(p, T_DEINTERLACE_MODE_BLEND_2X,
+				  OBS_DEINTERLACE_MODE_BLEND_2X);
+	obs_property_list_add_int(p, T_DEINTERLACE_MODE_LINEAR,
+				  OBS_DEINTERLACE_MODE_LINEAR);
+	obs_property_list_add_int(p, T_DEINTERLACE_MODE_LINEAR_2X,
+				  OBS_DEINTERLACE_MODE_LINEAR_2X);
+	obs_property_list_add_int(p, T_DEINTERLACE_MODE_YADIF,
+				  OBS_DEINTERLACE_MODE_YADIF);
+	obs_property_list_add_int(p, T_DEINTERLACE_MODE_YADIF_2X,
+				  OBS_DEINTERLACE_MODE_YADIF_2X);
+	p = obs_properties_add_list(props, S_DEINTERLACE_FIELD_ORDER,
+				    T_DEINTERLACE_FIELD_ORDER,
+				    OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(p, T_DEINTERLACE_FIELD_ORDER_TOP,
+				  OBS_DEINTERLACE_FIELD_ORDER_TOP);
+	obs_property_list_add_int(p, T_DEINTERLACE_FIELD_ORDER_BOTTOM,
+				  OBS_DEINTERLACE_FIELD_ORDER_BOTTOM);
+
 	dstr_copy(&filter, obs_module_text("MediaFileFilter.AllMediaFiles"));
 	dstr_cat(&filter, media_filter);
 	dstr_cat(&filter, obs_module_text("MediaFileFilter.VideoFiles"));
@@ -1184,6 +1235,10 @@ static void mps_update(void *data, obs_data_t *settings)
 	mps->shuffle = shuffle;
 	mps->loop = obs_data_get_bool(settings, S_LOOP);
 	shuffler_set_loop(&mps->shuffler, mps->loop);
+	/* Deinterlace settings. */
+	mps->deinterlace_mode = obs_data_get_int(settings, S_DEINTERLACE_MODE);
+	mps->deinterlace_field_order =
+		obs_data_get_int(settings, S_DEINTERLACE_FIELD_ORDER);
 
 	array = obs_data_get_array(settings, S_PLAYLIST);
 	count = obs_data_array_count(array);
@@ -1258,9 +1313,17 @@ static void mps_update(void *data, obs_data_t *settings)
 
 	free_files(&old_files.da);
 
+	/* Set deinterlace mode on source. */
+	obs_source_set_deinterlace_mode(mps->current_media_source,
+					mps->deinterlace_mode);
+	obs_source_set_deinterlace_field_order(mps->current_media_source,
+					       mps->deinterlace_field_order);
+
 	if (found || first_update) {
 		set_current_media_index(mps, mps->current_media_index);
-	} else {
+	}
+	else
+	{
 		set_current_media_index(mps, 0);
 	}
 

@@ -72,6 +72,10 @@ struct media_playlist_source {
 	enum visibility_behavior visibility_behavior;
 	enum restart_behavior restart_behavior;
 
+	/* OBS deinterlace mode and field order. */
+	enum obs_deinterlace_mode deinterlace_mode;
+	enum obs_deinterlace_field_order deinterlace_field_order;
+
 	struct circlebuf audio_data[MAX_AUDIO_CHANNELS];
 	struct circlebuf audio_frames;
 	struct circlebuf audio_timestamps;
